@@ -38,31 +38,23 @@ end
 #   sA = sB = Secret key
 
 class DHUser
+  attr_reader :generator, :prime, :id
+
   def initialize(generator, prime)
+    @id = SecureRandom.hex(4).to_i(16)
+
     @generator = generator
     @prime = prime
 
     new_key
   end
 
-  def generator
-    @generator
-  end
-
   def new_key
     @private_key = SecureRandom.hex(32).to_i(16)
   end
 
-  def prime
-    @prime
-  end
-
-  def private_key
-    @private_key
-  end
-
   def public_key
-    @public_key ||= modpow(generator, private_key, prime)
+    modpow(generator, private_key, prime)
   end
 end
 
