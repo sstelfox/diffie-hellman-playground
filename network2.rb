@@ -4,14 +4,18 @@ require "json"
 require "openssl"
 require "securerandom"
 
-def modpow(base, pow, mod)
-  base.to_bn.mod_exp(pow, mod).to_i
-end
-
 gp = JSON.parse(File.read('primes.json'))[0]
 
 GENERATOR=gp["generator"].to_i
 PRIME=gp["prime"].to_i(16)
+
+VERSION="0.2"
+
+class Integer
+  def mod_exp(pow, mod)
+    self.to_bn.mod_exp(pow, mod).to_i
+  end
+end
 
 class Network
   def initialize
@@ -42,10 +46,12 @@ class Network
 end
 
 class Client
-  attr_reader :client_id, :known_clients
+  attr_reader :client_id, :session_id, :private_key
 
   def initialize
     @client_id = SecureRandom.hex(6).downcase
+    @msg_handler = MsgHandler.new(self)
+    @private_key = rand(100) + 1
     @session_id = nil
 
     puts "Initialized: #{@client_id}"
@@ -54,13 +60,17 @@ class Client
   end
 
   def public_key
-    @public_key ||= modpow(@generator, @private_key, @prime).to_i
+    @public_key ||= @generator.mod_exp(@private_key, @prime)
   end
 
   def receive(message)
     msg = JSON.parse(message)
 
     return if @session_id && message["session"] != @session_id
+
+    if @msg_handler.respond_to?(msg["type"])
+      @msg_handler.send(msg["type"].to_sym, msg["data"])
+    end
   end
 
   private
@@ -71,6 +81,32 @@ class Client
     @socket = Network.instance
     @socket.register_client(self)
     @socket
+  end
+
+end
+
+class MsgHandler < BasicObject
+  def initialize(client)
+    @client = client
+  end
+
+  def respond_to?(name)
+    ["announce"].include?(name)
+  end
+
+  def send(*args)
+    __send__(*args)
+  end
+
+  ##### BEGIN PACKET HANDLERS #####
+
+  def announce(data)
+  end
+
+  private
+
+  def puts(output)
+    $stdout << output << "\n"
   end
 end
 
