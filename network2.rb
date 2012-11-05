@@ -143,11 +143,11 @@ end
 
 clients = []
 
-4.times do |n|
+20.times do |n|
   clients << Client.new("client#{n}")
 end
 
 clients.each do |c|
-  #puts c.known_hosts.join(",")
+  puts c.known_hosts.join(",")
 end
 
