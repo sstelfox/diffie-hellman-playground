@@ -32,11 +32,9 @@ class Network
     @clients << client
   end
 
-  def send(sender, message)
-    puts "#{sender} Sent:\t\t#{message}"
+  def transmit(sender, message)
     @clients.each do |c|
       unless c.client_id == sender
-        puts "#{c.client_id} Received:\t\t#{message}"
         c.receive(message)
       end
     end
@@ -47,30 +45,49 @@ end
 
 class Client
   attr_reader :client_id, :session_id, :private_key
+  attr_accessor :known_hosts
 
-  def initialize
-    @client_id = SecureRandom.hex(6).downcase
-    @msg_handler = MsgHandler.new(self)
-    @private_key = rand(100) + 1
-    @session_id = nil
+  def initialize(handle, session_name = nil)
+    @client_id    = SecureRandom.hex(6).downcase
+    @handle       = handle
+    @private_key  = SecureRandom.hex(32).to_i(16)
 
-    puts "Initialized: #{@client_id}"
+    @msg_handler  = MsgHandler.new(self)
+    
+    @session_name = session_name
+    @known_hosts  = [client_id]
 
-    socket.send(client_id, JSON.generate({"type" => "announce", "data" => client_id}))
+    transmit({"type" => "announce"})
+    transmit({"type" => "ping"})
+    transmit({"type" => "publicKey", "data" => public_key})
   end
 
   def public_key
-    @public_key ||= @generator.mod_exp(@private_key, @prime)
+    @public_key ||= GENERATOR.mod_exp(@private_key, PRIME)
   end
 
   def receive(message)
     msg = JSON.parse(message)
 
-    return if @session_id && message["session"] != @session_id
+    # Allows for multiple sessions to go on
+    return if msg["session"] && msg["session"] != @session_id
+    return if msg["destination"] && msg["destination"] != client_id
+
+    puts "#{client_id} Recv:\t #{message}"
 
     if @msg_handler.respond_to?(msg["type"])
-      @msg_handler.send(msg["type"].to_sym, msg["data"])
+      @msg_handler.send(msg["type"], msg)
     end
+  end
+
+  def transmit(data)
+    data["session"] = @session_name if @session_name
+    data["source"] = client_id
+
+    message = JSON.generate(data)
+    puts "#{client_id} Send:\t #{message}"
+    
+    socket.transmit(client_id, message)
   end
 
   private
@@ -82,7 +99,6 @@ class Client
     @socket.register_client(self)
     @socket
   end
-
 end
 
 class MsgHandler < BasicObject
@@ -91,7 +107,7 @@ class MsgHandler < BasicObject
   end
 
   def respond_to?(name)
-    ["announce"].include?(name)
+    ["announce", "ping", "pong"].include?(name)
   end
 
   def send(*args)
@@ -100,7 +116,20 @@ class MsgHandler < BasicObject
 
   ##### BEGIN PACKET HANDLERS #####
 
-  def announce(data)
+  def announce(msg)
+    unless @client.client_id == msg["source"] || @client.known_hosts.include?(msg["source"])
+      @client.known_hosts << msg["source"]
+      @client.known_hosts.sort!
+    end
+  end
+
+  def ping(msg)
+    @client.transmit({"type" => "pong", "destination" => msg["source"]})
+  end
+
+  def pong(msg)
+    # Register responses from a pong, like an announce
+    announce(msg)
   end
 
   private
@@ -112,7 +141,11 @@ end
 
 clients = []
 
-4.times do 
-  clients << Client.new
+4.times do |n|
+  clients << Client.new("client#{n}")
+end
+
+clients.each do |c|
+  puts c.known_hosts.join(",")
 end
 
