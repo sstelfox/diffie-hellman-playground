@@ -132,6 +132,8 @@ class MsgHandler < BasicObject
     announce(msg)
   end
 
+  ##### END PACKET HANDLERS #####
+
   private
 
   def puts(output)
@@ -146,6 +148,6 @@ clients = []
 end
 
 clients.each do |c|
-  puts c.known_hosts.join(",")
+  #puts c.known_hosts.join(",")
 end
 
