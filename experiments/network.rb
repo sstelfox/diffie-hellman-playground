@@ -184,7 +184,7 @@ end
 
 clients = []
 
-4.times do 
+6.times do 
   clients << Client.new
 end
 
@@ -192,5 +192,6 @@ puts
 
 clients.each do |c|
   puts "#{c.client_id}: #{c.known_clients.join(",")}"
+  puts "#{c.session_enc_key}"
 end
 
