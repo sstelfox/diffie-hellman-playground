@@ -7,7 +7,7 @@ require "securerandom"
 modp_groups = JSON.parse(File.read('primes.json'))
 
 # Pure ruby version
-def modpow(base, pow, mod)
+def modpow_pure(base, pow, mod)
   raise ArgumentError if pow < 0
   result = 1
   base = base % mod
@@ -55,6 +55,10 @@ class DHUser
 
   def public_key
     modpow(generator, private_key, prime)
+  end
+
+  def private_key
+    @private_key
   end
 end
 
