@@ -85,17 +85,17 @@ class Client
   ##### BEGIN PACKET HANDLERS #####
 
   def handle_init_key_exchange(msg)
+    add_source(msg["source"])
     init_private_key
     
-    @prime      = msg["data"]["prime"].to_i(16)
-    @generator  = msg["data"]["generator"].to_i(16)
+    @prime      = msg["data"]["prime"].to_i
+    @generator  = msg["data"]["generator"].to_i
 
     @session_key = {"hosts" => [client_id], "key" => public_key}
     announce_session_key
   end
 
   def handle_ping(msg)
-    reset_known_hosts
     add_source(msg["source"])
     transmit({"type" => "pong"})
   end
@@ -109,7 +109,7 @@ class Client
     # that has already been signed by itself it indicates that some client
     # shared the full completed session key across the network in plaintext.
     if msg["data"]["hosts"].include?(client_id)
-      puts "ERROR: Session key compromised."
+      log("ERROR: Session key compromised.", msg)
       return
     end
 
@@ -118,7 +118,7 @@ class Client
 
     @session_key = {
       "hosts" => (msg["data"]["hosts"] + [client_id]).sort,
-      "key"   => msg["data"]["key"].to_i(16).mod_exp(@private_key, @prime)
+      "key"   => msg["data"]["key"].to_i.mod_exp(@private_key, @prime)
     }
 
     unless @session_key["hosts"] == @known_hosts
@@ -137,11 +137,15 @@ class Client
     end
   end
 
+  def log(message, data = nil)
+    puts "#{client_id} Log:\t#{message} #{JSON.generate(data) unless data.nil?}".strip
+  end
+
   def transmit(data)
     data["source"] = client_id
 
     message = JSON.generate(data)
-    puts "#{client_id} Send:\t #{message}"
+    puts "#{client_id} Sent:\t#{message}"
     
     socket.transmit(client_id, message)
   end
@@ -153,9 +157,12 @@ class Client
     # Increment our position by 1 and wrap around to the first host if we go
     # beyond the number of known hosts
     next_position = (my_position + 1) % known_hosts.count
-
+    
     # No point in continuing if I'm going to be sending to myself
-    return if my_position == next_position
+    if my_position == next_position
+      log("Refusing to send to myself", data)
+      return
+    end
 
     # Set our destination and transmit as normal
     data["destination"] = known_hosts[next_position]
@@ -167,7 +174,7 @@ class Client
 
     return if msg["destination"] && msg["destination"] != client_id
 
-    puts "#{client_id} Recv:\t #{message}"
+    puts "#{client_id} Recv:\t#{message}"
 
     if self.respond_to?("handle_" + msg["type"])
       self.public_send("handle_" + msg["type"], msg)
@@ -183,13 +190,13 @@ class Client
       "type" => "public_key",
       "data" => {
         "hosts" => @session_key["hosts"],
-        "key"   => @session_key["key"].to_s(16)
+        "key"   => @session_key["key"].to_i
       }
     })
   end
 
   def init_private_key
-    @private_key  = SecureRandom.hex(32).to_i(16)
+    @private_key = SecureRandom.hex(32).to_i(16)
   end
 
   def request_new_session
@@ -201,8 +208,8 @@ class Client
     transmit({
       "type" => "init_key_exchange",
       "data" => {
-        "generator" => @generator.to_s(16),
-        "prime"     => @prime.to_s(16),
+        "generator" => @generator.to_i,
+        "prime"     => @prime.to_i,
       }
     })
 
@@ -221,14 +228,9 @@ end
 
 clients = []
 
-3.times do |n|
+4.times do |n|
   clients << Client.new("client#{n}")
 end
-
-clients.each do |c|
-  c.msg_queue = []
-end
-clients << Client.new("client3")
 
 processing = true
 while processing
