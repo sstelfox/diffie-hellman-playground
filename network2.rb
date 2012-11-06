@@ -143,6 +143,9 @@ class Client
       return
     end
 
+    # Don't over-write our session key if the message has fewer hosts listed
+    return if @session_key && ((msg["data"]["hosts"] & @known_hosts).count < @session_key["hosts"].count)
+
     @session_key = {
       "hosts" => (msg["data"]["hosts"] + [client_id]).sort,
       "key"   => msg["data"]["key"].to_i(16).mod_exp(@private_key, @prime)
@@ -184,7 +187,7 @@ class Client
         "prime"     => @prime.to_s(16),
       }
     })
-    
+
     @session_key = {"hosts" => [client_id], "key" => public_key}
     announce_session_key
   end
