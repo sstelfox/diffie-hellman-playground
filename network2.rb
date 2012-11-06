@@ -50,16 +50,15 @@ class Client
   def initialize(handle)
     @client_id    = SecureRandom.hex(6).downcase
     @handle       = handle
-    @known_hosts  = [client_id]
     @session_key  = nil
+
+    reset_known_hosts
 
     # Queue for pending network messages
     @msg_queue    = []
 
-    # Announce allows other clients to add this one to their known host list
-    transmit({"type" => "announce"})
-
-    # Ping allows this client to become aware of all other hosts
+    # Ping allows other clients to become aware of this new client and requests
+    # other live clients on the network to update their known host list
     transmit({"type" => "ping"})
 
     request_new_session
@@ -85,13 +84,6 @@ class Client
 
   ##### BEGIN PACKET HANDLERS #####
 
-  def handle_announce(msg)
-    unless client_id == msg["source"] || known_hosts.include?(msg["source"])
-      known_hosts << msg["source"]
-      known_hosts.sort!
-    end
-  end
-
   def handle_init_key_exchange(msg)
     init_private_key
     
@@ -103,12 +95,13 @@ class Client
   end
 
   def handle_ping(msg)
-    transmit({"type" => "pong", "destination" => msg["source"]})
+    reset_known_hosts
+    add_source(msg["source"])
+    transmit({"type" => "pong"})
   end
 
   def handle_pong(msg)
-    # Register responses from a ping like an announce
-    handle_announce(msg)
+    add_source(msg["source"])
   end
 
   def handle_public_key(msg)
@@ -136,6 +129,13 @@ class Client
   ##### END PACKET HANDLERS #####
 
   private
+
+  def add_source(source)
+    unless client_id == source || known_hosts.include?(source)
+      known_hosts << source
+      known_hosts.sort!
+    end
+  end
 
   def transmit(data)
     data["source"] = client_id
@@ -172,6 +172,10 @@ class Client
     if self.respond_to?("handle_" + msg["type"])
       self.public_send("handle_" + msg["type"], msg)
     end
+  end
+
+  def reset_known_hosts
+    @known_hosts  = [client_id]
   end
 
   def announce_session_key
@@ -217,9 +221,14 @@ end
 
 clients = []
 
-2.times do |n|
+3.times do |n|
   clients << Client.new("client#{n}")
 end
+
+clients.each do |c|
+  c.msg_queue = []
+end
+clients << Client.new("client3")
 
 processing = true
 while processing
