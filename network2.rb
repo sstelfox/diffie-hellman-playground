@@ -35,7 +35,7 @@ class Network
   def transmit(sender, message)
     @clients.each do |c|
       unless c.client_id == sender
-        c.receive(message)
+        c.msg_queue.push(message)
       end
     end
   end
@@ -45,13 +45,16 @@ end
 
 class Client
   attr_reader :client_id, :session_key
-  attr_accessor :known_hosts
+  attr_accessor :known_hosts, :msg_queue
 
   def initialize(handle)
     @client_id    = SecureRandom.hex(6).downcase
     @handle       = handle
     @known_hosts  = [client_id]
     @session_key  = nil
+
+    # Queue for pending network messages
+    @msg_queue    = []
 
     # Announce allows other clients to add this one to their known host list
     transmit({"type" => "announce"})
@@ -62,48 +65,22 @@ class Client
     request_new_session
   end
 
+  # Process exactly one message
+  def tick
+    return if sleeping?
+    receive(@msg_queue.shift)
+  end
+
+  # Returns true if the client has no pending messages to process
+  def sleeping?
+    @msg_queue.empty?
+  end
+
   def public_key
     return @public_key unless @public_key.nil?
     return nil if @generator.nil? || @prime.nil? || @private_key.nil?
 
     @public_key = @generator.mod_exp(@private_key, @prime)
-  end
-
-  def receive(message)
-    msg = JSON.parse(message)
-
-    return if msg["destination"] && msg["destination"] != client_id
-
-    puts "#{client_id} Recv:\t #{message}"
-
-    if self.respond_to?("handle_" + msg["type"])
-      self.public_send("handle_" + msg["type"], msg)
-    end
-  end
-
-  def transmit(data)
-    data["source"] = client_id
-
-    message = JSON.generate(data)
-    puts "#{client_id} Send:\t #{message}"
-    
-    socket.transmit(client_id, message)
-  end
-
-  def transmit_to_next_host(data)
-    # Find this client's position in the list
-    my_position = known_hosts.index(client_id)
-
-    # Increment our position by 1 and wrap around to the first host if we go
-    # beyond the number of known hosts
-    next_position = (my_position + 1) % known_hosts.count
-
-    # No point in continuing if I'm going to be sending to myself
-    return if my_position == next_position
-
-    # Set our destination and transmit as normal
-    data["destination"] = known_hosts[next_position]
-    transmit(data)
   end
 
   ##### BEGIN PACKET HANDLERS #####
@@ -160,6 +137,43 @@ class Client
 
   private
 
+  def transmit(data)
+    data["source"] = client_id
+
+    message = JSON.generate(data)
+    puts "#{client_id} Send:\t #{message}"
+    
+    socket.transmit(client_id, message)
+  end
+
+  def transmit_to_next_host(data)
+    # Find this client's position in the list
+    my_position = known_hosts.index(client_id)
+
+    # Increment our position by 1 and wrap around to the first host if we go
+    # beyond the number of known hosts
+    next_position = (my_position + 1) % known_hosts.count
+
+    # No point in continuing if I'm going to be sending to myself
+    return if my_position == next_position
+
+    # Set our destination and transmit as normal
+    data["destination"] = known_hosts[next_position]
+    transmit(data)
+  end
+
+  def receive(message)
+    msg = JSON.parse(message)
+
+    return if msg["destination"] && msg["destination"] != client_id
+
+    puts "#{client_id} Recv:\t #{message}"
+
+    if self.respond_to?("handle_" + msg["type"])
+      self.public_send("handle_" + msg["type"], msg)
+    end
+  end
+
   def announce_session_key
     transmit_to_next_host({
       "type" => "public_key",
@@ -203,8 +217,18 @@ end
 
 clients = []
 
-4.times do |n|
+2.times do |n|
   clients << Client.new("client#{n}")
+end
+
+processing = true
+while processing
+  clients.each do |c|
+    c.tick
+  end
+
+  # Continue processing until all clients are sleeping
+  processing = !(clients.inject(true) { |p, c| p && c.sleeping? })
 end
 
 puts
