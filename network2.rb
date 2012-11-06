@@ -50,20 +50,21 @@ class Client
   def initialize(handle, session_name = nil)
     @client_id    = SecureRandom.hex(6).downcase
     @handle       = handle
-    @private_key  = SecureRandom.hex(32).to_i(16)
-
-    @msg_handler  = MsgHandler.new(self)
     
     @session_name = session_name
     @known_hosts  = [client_id]
 
     transmit({"type" => "announce"})
     transmit({"type" => "ping"})
-    transmit({"type" => "publicKey", "data" => public_key})
+
+    request_new_session
   end
 
   def public_key
-    @public_key ||= GENERATOR.mod_exp(@private_key, PRIME)
+    return @public_key unless @public_key.nil?
+    return nil if @generator.nil? || @prime.nil? || @private_key.nil?
+
+    @public_key = @generator.mod_exp(@private_key, @prime)
   end
 
   def receive(message)
@@ -75,8 +76,8 @@ class Client
 
     puts "#{client_id} Recv:\t #{message}"
 
-    if @msg_handler.respond_to?(msg["type"])
-      @msg_handler.send(msg["type"], msg)
+    if self.respond_to?(msg["type"])
+      self.public_send(msg["type"], msg)
     end
   end
 
@@ -90,7 +91,38 @@ class Client
     socket.transmit(client_id, message)
   end
 
+  ##### BEGIN PACKET HANDLERS #####
+
+  def announce(msg)
+    unless client_id == msg["source"] || known_hosts.include?(msg["source"])
+      known_hosts << msg["source"]
+      known_hosts.sort!
+    end
+  end
+
+  def ping(msg)
+    transmit({"type" => "pong", "destination" => msg["source"]})
+  end
+
+  def pong(msg)
+    # Register responses from a ping like an announce
+    announce(msg)
+  end
+
+  ##### END PACKET HANDLERS #####
+
   private
+
+  def init_private_key
+    @private_key  = SecureRandom.hex(32).to_i(16)
+  end
+
+  def request_new_session
+    init_private_key
+
+    @generator = GENERATOR
+    @prime = PRIME
+  end
 
   def socket
     return @socket unless @socket.nil?
@@ -101,49 +133,9 @@ class Client
   end
 end
 
-class MsgHandler < BasicObject
-  def initialize(client)
-    @client = client
-  end
-
-  def respond_to?(name)
-    ["announce", "ping", "pong"].include?(name)
-  end
-
-  def send(*args)
-    __send__(*args)
-  end
-
-  ##### BEGIN PACKET HANDLERS #####
-
-  def announce(msg)
-    unless @client.client_id == msg["source"] || @client.known_hosts.include?(msg["source"])
-      @client.known_hosts << msg["source"]
-      @client.known_hosts.sort!
-    end
-  end
-
-  def ping(msg)
-    @client.transmit({"type" => "pong", "destination" => msg["source"]})
-  end
-
-  def pong(msg)
-    # Register responses from a pong, like an announce
-    announce(msg)
-  end
-
-  ##### END PACKET HANDLERS #####
-
-  private
-
-  def puts(output)
-    $stdout << output << "\n"
-  end
-end
-
 clients = []
 
-20.times do |n|
+4.times do |n|
   clients << Client.new("client#{n}")
 end
 
